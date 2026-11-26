@@ -1,0 +1,43 @@
+name: Check lab SSH
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+
+jobs:
+  check-ssh:
+    name: Check SSH over Tailscale
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: lab
+    timeout-minutes: 5
+
+    steps:
+      - name: Join the tailnet
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:github-deploy
+
+      - name: Read the OpenSSH banner
+        env:
+          LAB_TAILSCALE_IP: ${{ vars.LAB_TAILSCALE_IP }}
+        run: |
+          if [[ -z "$LAB_TAILSCALE_IP" ]]; then
+            echo "LAB_TAILSCALE_IP is missing from the lab environment"
+            exit 1
+          fi
+
+          if timeout 10s bash -c '
+            exec 3<>"/dev/tcp/$1/2222"
+            IFS= read -r banner <&3
+            [[ "$banner" == SSH-* ]]
+          ' _ "$LAB_TAILSCALE_IP" 2>/dev/null; then
+            echo "OpenSSH answered on TCP port 2222"
+          else
+            echo "No SSH banner received on TCP port 2222"
+            exit 1
+          fi
