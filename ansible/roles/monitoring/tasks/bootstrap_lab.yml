@@ -1,0 +1,97 @@
+---
+- name: Создать временный каталог для проверки первого запуска Grafana
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: grafana-bootstrap-lab-
+  register: grafana_lab_dir
+
+- name: Проверить первый запуск Grafana с временным секретом
+  block:
+    - name: Подготовить файл с начальным паролем Grafana
+      ansible.builtin.template:
+        src: grafana_admin_password.j2
+        dest: "{{ grafana_lab_dir.path }}/grafana_admin_password.bootstrap"
+        owner: "{{ grafana_container_uid }}"
+        mode: '0400'
+      no_log: true
+      diff: false
+    - name: Проверить чтение секрета из контейнера под UID Grafana
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - --rm
+          - --pull=never
+          - --network=none
+          - --user
+          - "{{ grafana_container_uid }}"
+          - --mount
+          - "type=bind,source={{ grafana_lab_dir.path }}/grafana_admin_password.bootstrap,target=/run/secrets/grafana_admin_password,readonly"
+          - --entrypoint
+          - /bin/sh
+          - grafana/grafana:12.0.1
+          - -ec
+          - 'test -s /run/secrets/grafana_admin_password && cat /run/secrets/grafana_admin_password > /dev/null'
+      changed_when: false
+    - name: Скопировать базовый Compose-файл тестовой Grafana
+      ansible.builtin.copy:
+        src: compose.grafana-lab.yaml
+        dest: "{{ grafana_lab_dir.path }}/compose.yaml"
+        mode: '0600'
+
+    - name: Скопировать развернутую конфигурацию первого запуска
+      ansible.builtin.copy:
+        src: "{{ monitoring_dir }}/compose.bootstrap.yaml"
+        dest: "{{ grafana_lab_dir.path }}/compose.bootstrap.yaml"
+        remote_src: true
+        mode: preserve
+    - name: Запустить тестовую Grafana с начальным паролем из Vault
+      ansible.builtin.command:
+        cmd: >-
+          docker compose -p grafana-bootstrap-lab
+          -f compose.yaml -f compose.bootstrap.yaml
+          up -d grafana
+        chdir: "{{ grafana_lab_dir.path }}"
+      register: grafana_lab_start
+    - name: Дождаться готовности базы тестовой Grafana
+      ansible.builtin.command:
+        cmd: >-
+          docker compose -p grafana-bootstrap-lab
+          -f compose.yaml -f compose.bootstrap.yaml
+          exec -T grafana wget -q -O - http://127.0.0.1:3000/api/health
+        chdir: "{{ grafana_lab_dir.path }}"
+      register: grafana_lab_health
+      changed_when: false
+      until: >-
+        grafana_lab_health.rc == 0 and
+        (grafana_lab_health.stdout | from_json).get('database') == 'ok'
+      retries: 30
+      delay: 2
+    - name: Проверить вход в тестовую Grafana с паролем из Vault
+      ansible.builtin.command:
+        cmd: >-
+          docker compose -p grafana-bootstrap-lab
+          -f compose.yaml -f compose.bootstrap.yaml
+          exec -T grafana curl --silent --show-error --fail
+          --max-time 10 --header @- http://127.0.0.1:3000/api/user
+        chdir: "{{ grafana_lab_dir.path }}"
+        stdin: "Authorization: Basic {{ ('admin:' ~ vault_grafana_admin_password) | b64encode }}"
+      register: grafana_lab_login
+      changed_when: false
+      failed_when: >-
+        grafana_lab_login.rc != 0 or
+        (grafana_lab_login.stdout | from_json).get('login') != 'admin'
+      no_log: true
+  always:
+    - name: Остановить тестовую Grafana и удалить её контейнер
+      ansible.builtin.command:
+        cmd: >-
+          docker compose -p grafana-bootstrap-lab
+          -f compose.yaml -f compose.bootstrap.yaml
+          down
+        chdir: "{{ grafana_lab_dir.path }}"
+      when: grafana_lab_start is defined
+    - name: Удалить временный каталог вместе с файлом пароля
+      ansible.builtin.file:
+        path: "{{ grafana_lab_dir.path }}"
+        state: absent

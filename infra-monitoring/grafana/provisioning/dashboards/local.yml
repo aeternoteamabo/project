@@ -1,0 +1,6 @@
+apiVersion: 1
+providers:
+  - name: WSL
+    type: file
+    options:
+      path: /dashboards

@@ -1,0 +1,4 @@
+---
+ssh_hardening_port: 2222
+ssh_hardening_allowed_users:
+  - adminops

@@ -1,0 +1,16 @@
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "{{ nginx_http_port }}:80"
+    volumes:
+      - ./conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - monitoring_net
+
+networks:
+  monitoring_net:
+    name: "{{ nginx_docker_network }}"
+    external: true

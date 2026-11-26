@@ -1,0 +1,20 @@
+loki.source.journal "fedora" {
+  max_age = "24h"
+  labels = { job = "fedora-journal", host = "fedora-wsl" }
+  relabel_rules = discovery.relabel.journal.rules
+  forward_to = [loki.write.local.receiver]
+}
+
+discovery.relabel "journal" {
+  targets = []
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label = "unit"
+  }
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

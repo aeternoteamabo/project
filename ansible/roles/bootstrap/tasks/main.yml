@@ -1,0 +1,12 @@
+---
+- name: Подготовить пакеты Fedora
+  ansible.builtin.import_tasks: packages.yml
+  tags: [packages]
+
+- name: Настроить службы Fedora
+  ansible.builtin.import_tasks: services.yml
+  tags: [services]
+
+- name: Настроить учётные записи
+  ansible.builtin.import_tasks: accounts.yml
+  tags: [accounts]

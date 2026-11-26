@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+*.vault-pass
+fedora44_adminops
+fedora44_root_bootstrap
+grafana_admin_password.bootstrap
+/infra-monitoring/ansible/
+
+/ansible/inventory/host_vars/mon-server/vault.yml

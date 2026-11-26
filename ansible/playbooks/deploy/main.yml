@@ -1,0 +1,47 @@
+---
+- name: Deploy | Развернуть стек мониторинга
+  hosts: monitoring
+  remote_user: adminops
+  become: true
+  tags: [deploy]
+
+  vars:
+    ansible_user: adminops
+
+  pre_tasks:
+    - name: Проверить вход по SSH под adminops
+      become: false
+      ansible.builtin.command: id -un
+      register: ssh_login
+      changed_when: false
+      failed_when: ssh_login.stdout != 'adminops'
+
+    - name: Проверить повышение прав до root через sudo
+      ansible.builtin.command: id -u
+      register: sudo_uid
+      changed_when: false
+      failed_when: sudo_uid.stdout != '0'
+
+  roles:
+    - role: docker
+      tags: [docker]
+
+    - role: monitoring
+      tags: [monitoring]
+
+    - role: nginx
+      tags: [nginx]
+
+  post_tasks:
+    - name: Проверить Grafana через Nginx
+      become: false
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ nginx_http_port }}/api/health"
+        status_code: 200
+      register: grafana_health
+      until: >-
+        grafana_health.status | default(0) == 200 and
+        (grafana_health.json | default({})).get('database') == 'ok'
+      retries: 10
+      delay: 3
+      tags: [nginx]

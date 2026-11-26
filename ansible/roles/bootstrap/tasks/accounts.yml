@@ -1,0 +1,54 @@
+---
+- name: Найти учётную запись adminops
+  ansible.builtin.getent:
+    database: passwd
+    key: adminops
+    fail_key: false
+
+- name: Проверить данные до создания учётной записи
+  ansible.builtin.assert:
+    that:
+      - deploy_public_key.startswith('ssh-ed25519 ')
+      - ansible_facts.getent_passwd.adminops is not none or (adminops_password_hash | default('') | length > 0)
+    fail_msg: Проверь публичный ключ. Для новой учётной записи задай adminops_password_hash в Vault.
+
+- name: Настроить пользователя и вход по ключу
+  become: true
+  block:
+    - name: Создать пользователя или добавить существующего в wheel
+      ansible.builtin.user:
+        name: adminops
+        groups: wheel
+        append: true
+        create_home: true
+        shell: /bin/bash
+        password: "{{ adminops_password_hash | default(omit) }}"
+        update_password: on_create
+      register: deploy_account
+      no_log: true
+
+    - name: Подготовить каталог SSH
+      ansible.builtin.file:
+        path: "{{ deploy_account.home }}/.ssh"
+        state: directory
+        owner: adminops
+        mode: '0700'
+
+    - name: Разрешить вход по ключу контроллера
+      ansible.builtin.lineinfile:
+        path: "{{ deploy_account.home }}/.ssh/authorized_keys"
+        line: "{{ deploy_public_key }}"
+        create: true
+        owner: adminops
+        mode: '0600'
+
+    - name: Задать umask для новых оболочек Bash пользователя
+      ansible.builtin.blockinfile:
+        path: "{{ deploy_account.home }}/{{ item }}"
+        marker: "# {mark} ANSIBLE MANAGED UMASK"
+        block: umask 007
+        create: true
+        owner: adminops
+      loop:
+        - .bashrc
+        - .bash_profile

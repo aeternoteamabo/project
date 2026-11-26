@@ -1,0 +1,106 @@
+---
+- name: Создать рабочую директорию для стека мониторинга
+  ansible.builtin.file:
+    path: "{{ monitoring_dir }}"
+    state: directory
+    owner: "{{ monitoring_user }}"
+    group: "{{ monitoring_group }}"
+    mode: "0755"
+
+- name: Скопировать Compose-файл и конфигурации сервисов
+  ansible.builtin.copy:
+    src: "{{ monitoring_local_src }}/{{ item }}"
+    dest: "{{ monitoring_dir }}/"
+    owner: "{{ monitoring_user }}"
+    group: "{{ monitoring_group }}"
+    mode: '0644'
+    directory_mode: '0755'
+  loop:
+    - compose.yaml
+    - compose.bootstrap.yaml
+    - alertmanager
+    - alloy
+    - blackbox
+    - grafana
+    - loki
+    - prometheus
+
+- name: Проверить наличие рабочего тома Grafana
+  become: false
+  ansible.builtin.command:
+    argv:
+      - docker
+      - volume
+      - ls
+      - --quiet
+      - --filter
+      - "name=^{{ monitoring_grafana_volume | regex_escape }}$"
+  register: grafana_volume_lookup
+  changed_when: false
+
+- name: Проверить наличие базы Grafana в рабочем томе
+  become: false
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network=none
+      - --user
+      - "{{ grafana_container_uid }}"
+      - --mount
+      - "type=volume,source={{ monitoring_grafana_volume }},target=/data,readonly"
+      - --entrypoint
+      - /bin/sh
+      - grafana/grafana:12.0.1
+      - -ec
+      - |
+        test -r /data && test -x /data || exit 2
+        if [ ! -e /data/grafana.db ]; then
+          echo absent
+        elif [ -f /data/grafana.db ] && [ -r /data/grafana.db ] && [ -s /data/grafana.db ]; then
+          echo present
+        else
+          echo "grafana.db существует, но проверить файл не удалось" >&2
+          exit 2
+        fi
+  when: monitoring_grafana_volume in grafana_volume_lookup.stdout_lines
+  register: grafana_db_probe
+  changed_when: false
+
+- name: Проверить отметку незавершённой настройки Grafana
+  become: true
+  ansible.builtin.stat:
+    path: "{{ monitoring_dir }}/.grafana-bootstrap-in-progress"
+  register: grafana_bootstrap_marker
+
+- name: Определить, нужна ли первоначальная настройка Grafana
+  ansible.builtin.set_fact:
+    grafana_needs_bootstrap: >-
+      {{
+        grafana_bootstrap_marker.stat.exists
+        or monitoring_grafana_volume not in grafana_volume_lookup.stdout_lines
+        or grafana_db_probe.stdout == 'absent'
+      }}
+
+- name: Выполнить первоначальную настройку Grafana при необходимости
+  ansible.builtin.import_tasks: bootstrap_grafana.yml
+  when: grafana_needs_bootstrap | bool
+
+- name: Запустить стек мониторинга через Docker Compose
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_dir }}"
+    project_name: "{{ monitoring_compose_project }}"
+    state: present
+  become: true
+  environment:
+    MONITORING_NETWORK_NAME: "{{ monitoring_docker_network | default('monitoring_net') }}"
+  become_user: "{{ monitoring_user }}"
+
+- name: Запустить проверку временного секрета Grafana
+  ansible.builtin.include_tasks:
+    file: bootstrap_lab.yml
+    apply:
+      tags: [grafana_bootstrap_lab]
+  when: "'grafana_bootstrap_lab' in ansible_run_tags"
+  tags: [grafana_bootstrap_lab]

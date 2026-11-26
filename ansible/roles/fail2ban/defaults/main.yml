@@ -1,0 +1,5 @@
+---
+fail2ban_ssh_port: "{{ ansible_port | default(2222) }}"
+fail2ban_ssh_maxretry: 5
+fail2ban_ssh_findtime: 10m
+fail2ban_ssh_bantime: 1440m

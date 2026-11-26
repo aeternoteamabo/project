@@ -1,0 +1,16 @@
+---
+- name: Разрешить порт SSH в выбранной зоне
+  ansible.posix.firewalld:
+    zone: "{{ firewall_zone }}"
+    port: "{{ firewall_ssh_port }}"
+    state: enabled
+    permanent: true
+    immediate: true
+
+- name: Убрать разрешение стандартного сервиса ssh из выбранной зоны
+  ansible.posix.firewalld:
+    zone: "{{ firewall_zone }}"
+    service: ssh
+    state: disabled
+    permanent: true
+    immediate: true

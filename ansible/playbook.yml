@@ -1,0 +1,72 @@
+---
+- name: Bootstrap | Первоначальная настройка Fedora
+  hosts: monitoring
+  gather_facts: false
+  any_errors_fatal: true
+  remote_user: root
+  become: false
+  tags: [bootstrap]
+  vars:
+    ansible_user: root
+    ansible_ssh_private_key_file: /home/asik/.ssh/fedora44_root_bootstrap
+    deploy_public_key: "{{ lookup('ansible.builtin.file', '~/.ssh/fedora44_adminops.pub') }}"
+  roles:
+    - bootstrap
+
+- name: Deploy | Развернуть стек мониторинга
+  hosts: monitoring
+  remote_user: adminops
+  become: true
+  tags: [deploy]
+  vars:
+    ansible_user: adminops
+
+  pre_tasks:
+    - name: Проверить вход по SSH под adminops
+      become: false
+      ansible.builtin.command: id -un
+      register: ssh_login
+      changed_when: false
+      failed_when: ssh_login.stdout != 'adminops'
+      tags: [ssh_hardening]
+
+    - name: Проверить повышение прав до root через sudo
+      become: true
+      ansible.builtin.command: id -u
+      register: sudo_uid
+      changed_when: false
+      failed_when: sudo_uid.stdout != '0'
+      tags: [ssh_hardening]
+
+  roles:
+    - role: firewall
+      tags: [firewall]
+
+    - role: ssh_hardening
+      tags: [ssh_hardening]
+
+    - role: fail2ban
+      tags: [fail2ban]
+
+    - role: docker
+      tags: [docker]
+
+    - role: monitoring
+      tags: [monitoring]
+
+    - role: nginx
+      tags: [nginx]
+
+  post_tasks:
+    - name: Проверить Grafana через Nginx
+      become: false
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ nginx_http_port }}/api/health"
+        status_code: 200
+      register: grafana_health
+      until: >-
+        grafana_health.status | default(0) == 200 and
+        (grafana_health.json | default({})).get('database') == 'ok'
+      retries: 10
+      delay: 3
+      tags: [nginx]

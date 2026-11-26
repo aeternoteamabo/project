@@ -1,0 +1,35 @@
+---
+- name: Создать директории для Nginx proxy
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nginx_user }}"
+    group: "{{ nginx_group }}"
+    mode: "0755"
+  loop:
+    - "{{ nginx_dir }}"
+    - "{{ nginx_dir }}/conf.d"
+
+- name: Сгенерировать конфигурацию default.conf
+  ansible.builtin.template:
+    src: default.conf.j2
+    dest: "{{ nginx_dir }}/conf.d/default.conf"
+    owner: "{{ nginx_user }}"
+    group: "{{ nginx_group }}"
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Сгенерировать docker-compose.yml для Nginx
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ nginx_dir }}/docker-compose.yml"
+    owner: "{{ nginx_user }}"
+    group: "{{ nginx_group }}"
+    mode: "0644"
+
+- name: Запустить контейнер Nginx
+  community.docker.docker_compose_v2:
+    project_src: "{{ nginx_dir }}"
+    state: present
+  become: true
+  become_user: "{{ nginx_user }}"

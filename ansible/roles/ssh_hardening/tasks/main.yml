@@ -1,0 +1,33 @@
+---
+- name: Установить и проверить настройки SSH
+  become: true
+  block:
+    - name: Установить конфигурацию из шаблона
+      ansible.builtin.template:
+        src: 00-local-hardening.conf.j2
+        dest: /etc/ssh/sshd_config.d/00-local-hardening.conf
+        owner: root
+        group: root
+        mode: '0644'
+        backup: true
+      register: ssh_hardening_config
+
+    - name: Проверить конфигурацию sshd
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: ssh_hardening_config.changed
+      notify: Reload sshd
+
+  rescue:
+    - name: Восстановить прежнюю конфигурацию из резервной копии
+      ansible.builtin.copy:
+        src: "{{ ssh_hardening_config.backup_file }}"
+        dest: /etc/ssh/sshd_config.d/00-local-hardening.conf
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0644'
+      when: ssh_hardening_config.backup_file is defined
+
+    - name: Остановить выполнение роли при ошибке
+      ansible.builtin.fail:
+        msg: "Настройка SSH прервана. Подробности ошибки: {{ ansible_failed_result.msg }}"

@@ -1,0 +1,61 @@
+---
+- name: Bootstrap | Первоначальная настройка Fedora
+  hosts: monitoring
+  gather_facts: false
+  any_errors_fatal: true
+  remote_user: root
+  become: false
+  tags: [bootstrap]
+
+  vars:
+    ansible_user: root
+    bootstrap_controller_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+    ansible_ssh_private_key_file: >-
+      {{ bootstrap_private_key_file
+         | default(bootstrap_controller_home ~ '/.ssh/fedora44_root_bootstrap') }}
+    deploy_public_key: >-
+      {{ lookup('ansible.builtin.file',
+                adminops_public_key_file
+                | default(bootstrap_controller_home ~ '/.ssh/fedora44_adminops.pub')) }}
+
+  roles:
+    - role: bootstrap
+
+- name: Bootstrap | Завершить настройку Fedora под adminops
+  hosts: monitoring
+  gather_facts: false
+  any_errors_fatal: true
+  remote_user: adminops
+  become: true
+  tags: [bootstrap_finalize]
+
+  vars:
+    ansible_user: adminops
+    ansible_ssh_private_key_file: >-
+      {{ adminops_private_key_file | default('~/.ssh/fedora44_adminops') }}
+
+  pre_tasks:
+    - name: Проверить SSH-вход под adminops
+      become: false
+      ansible.builtin.command: id -un
+      register: ssh_login
+      changed_when: false
+      failed_when: ssh_login.stdout != 'adminops'
+      tags: [ssh_hardening]
+
+    - name: Проверить повышение прав до root через sudo
+      ansible.builtin.command: id -u
+      register: sudo_uid
+      changed_when: false
+      failed_when: sudo_uid.stdout != '0'
+      tags: [ssh_hardening]
+
+  roles:
+    - role: firewall
+      tags: [firewall]
+
+    - role: ssh_hardening
+      tags: [ssh_hardening]
+
+    - role: fail2ban
+      tags: [fail2ban]

@@ -1,0 +1,18 @@
+---
+- name: Разрешить начальный SSH-порт перед запуском firewalld
+  ansible.posix.firewalld:
+    zone: "{{ bootstrap_firewall_zone }}"
+    port: "{{ ansible_port | default(22) }}/tcp"
+    state: enabled
+    permanent: true
+    immediate: true
+    offline: true
+
+- name: Включить автозапуск и запустить SSH и firewalld
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - sshd.service
+    - firewalld.service

@@ -1,0 +1,34 @@
+---
+- name: Проверить наличие сокета Docker Desktop
+  ansible.builtin.stat:
+    path: /var/run/docker.sock
+  register: docker_sock
+
+- name: Остановить выполнение, если Docker Desktop не запущен
+  ansible.builtin.fail:
+    msg: "Сокет /var/run/docker.sock не найден. Запустите Docker Desktop в Windows."
+  when: not docker_sock.stat.exists
+
+- name: Убедиться, что группа docker существует
+  ansible.builtin.group:
+    name: docker
+    state: present
+
+- name: Добавить пользователя {{ docker_user }} в группу docker
+  ansible.builtin.user:
+    name: "{{ docker_user }}"
+    groups: docker
+    append: true
+
+- name: Открыть новое SSH-соединение с актуальными группами пользователя
+  ansible.builtin.meta: reset_connection
+
+- name: Проверить доступ к движку Docker через SSH-сеанс adminops
+  ansible.builtin.command: docker info
+  become: false
+  changed_when: false
+
+- name: Проверить доступность Docker Compose для adminops
+  ansible.builtin.command: docker compose version
+  become: false
+  changed_when: false

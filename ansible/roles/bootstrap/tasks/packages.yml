@@ -1,0 +1,22 @@
+---
+- name: Проверить SSH-вход под root
+  ansible.builtin.command: id -u
+  register: bootstrap_uid
+  changed_when: false
+  failed_when: bootstrap_uid.stdout != '0'
+
+- name: Обновить установленные пакеты Fedora
+  ansible.builtin.dnf5:
+    name: "*"
+    state: latest
+    update_cache: true
+
+- name: Установить пакеты SSH, firewalld и Fail2ban
+  ansible.builtin.dnf5:
+    name:
+      - openssh-server
+      - firewalld
+      - fail2ban-server
+      - fail2ban-firewalld
+      - fail2ban-systemd
+    state: present

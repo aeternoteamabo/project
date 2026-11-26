@@ -1,0 +1,6 @@
+---
+nginx_user: adminops
+nginx_group: adminops
+nginx_dir: /opt/nginx-proxy
+nginx_http_port: 8080
+nginx_docker_network: "{{ monitoring_docker_network | default('monitoring_net') }}"

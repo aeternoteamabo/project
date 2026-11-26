@@ -1,0 +1,110 @@
+---
+- name: Выполнить первоначальную настройку Grafana
+  environment:
+    MONITORING_NETWORK_NAME: "{{ monitoring_docker_network | default('monitoring_net') }}"
+  block:
+    - name: Отметить начало первоначальной настройки Grafana
+      become: true
+      ansible.builtin.file:
+        path: "{{ monitoring_dir }}/.grafana-bootstrap-in-progress"
+        state: touch
+        owner: root
+        group: root
+        mode: '0600'
+    - name: Подготовить временный файл с начальным паролем из Vault
+      become: true
+      ansible.builtin.template:
+        src: grafana_admin_password.j2
+        dest: "{{ monitoring_dir }}/grafana_admin_password.bootstrap"
+        owner: "{{ grafana_container_uid }}"
+        mode: '0400'
+      no_log: true
+      diff: false
+
+    - name: Запустить Grafana с начальным паролем из Vault
+      become: false
+      ansible.builtin.command:
+        cmd: >-
+          docker compose -p {{ monitoring_compose_project }}
+          -f compose.yaml -f compose.bootstrap.yaml
+          up -d --no-deps grafana
+        chdir: "{{ monitoring_dir }}"
+
+    - name: Дождаться готовности базы Grafana после первого запуска
+      become: false
+      ansible.builtin.command:
+        cmd: >-
+          docker compose -p {{ monitoring_compose_project }}
+          exec -T grafana wget -q -O - http://127.0.0.1:3000/api/health
+        chdir: "{{ monitoring_dir }}"
+      register: grafana_bootstrap_health
+      changed_when: false
+      until: >-
+        grafana_bootstrap_health.rc == 0 and
+        (grafana_bootstrap_health.stdout | from_json).get('database') == 'ok'
+      retries: 30
+      delay: 2
+
+    - name: Проверить вход администратора с паролем из Vault
+      become: false
+      ansible.builtin.command:
+        cmd: >-
+          docker compose -p {{ monitoring_compose_project }}
+          exec -T grafana curl --silent --show-error --fail
+          --max-time 10 --header @- http://127.0.0.1:3000/api/user
+        chdir: "{{ monitoring_dir }}"
+        stdin: "Authorization: Basic {{ ('admin:' ~ vault_grafana_admin_password) | b64encode }}"
+      register: grafana_bootstrap_login
+      changed_when: false
+      failed_when: >-
+        grafana_bootstrap_login.rc != 0 or
+        (grafana_bootstrap_login.stdout | from_json).get('login') != 'admin'
+      no_log: true
+
+    - name: Пересоздать Grafana без временного секрета
+      become: false
+      ansible.builtin.command:
+        cmd: >-
+          docker compose -p {{ monitoring_compose_project }}
+          up -d --no-deps --force-recreate grafana
+        chdir: "{{ monitoring_dir }}"
+
+    - name: Проверить вход администратора после пересоздания Grafana
+      become: false
+      ansible.builtin.command:
+        cmd: >-
+          docker compose -p {{ monitoring_compose_project }}
+          exec -T grafana curl --silent --show-error --fail
+          --max-time 10 --header @- http://127.0.0.1:3000/api/user
+        chdir: "{{ monitoring_dir }}"
+        stdin: "Authorization: Basic {{ ('admin:' ~ vault_grafana_admin_password) | b64encode }}"
+      register: grafana_login_after_recreate
+      changed_when: false
+      until: >-
+        grafana_login_after_recreate.rc == 0 and
+        (grafana_login_after_recreate.stdout | from_json).get('login') == 'admin'
+      retries: 30
+      delay: 2
+      no_log: true
+  rescue:
+    - name: Сообщить код ошибки первоначальной настройки Grafana
+      ansible.builtin.fail:
+        msg: >-
+          Задача «{{ ansible_failed_task.name }}» завершилась ошибкой.
+          Код команды: {{ ansible_failed_result.rc | default('не получен') }}.
+          HTTP-статус: {{
+            (ansible_failed_result.stderr | default('')
+             | regex_search('(?<=returned error: )[0-9]{3}'))
+            | default('не найден', true)
+          }}.
+  always:
+    - name: Удалить временный файл с начальным паролем Grafana
+      become: true
+      ansible.builtin.file:
+        path: "{{ monitoring_dir }}/grafana_admin_password.bootstrap"
+        state: absent
+- name: Снять отметку после успешной первоначальной настройки Grafana
+  become: true
+  ansible.builtin.file:
+    path: "{{ monitoring_dir }}/.grafana-bootstrap-in-progress"
+    state: absent

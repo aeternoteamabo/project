@@ -1,0 +1,10 @@
+# Managed by Ansible: ssh_hardening
+Port {{ ssh_hardening_port }}
+PermitRootLogin no
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+AllowUsers {{ ssh_hardening_allowed_users | join(' ') }}
+MaxAuthTries 3
+LogLevel VERBOSE

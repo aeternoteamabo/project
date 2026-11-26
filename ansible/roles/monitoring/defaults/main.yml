@@ -1,0 +1,10 @@
+---
+monitoring_user: adminops
+monitoring_group: adminops
+monitoring_dir: /opt/infra-monitoring
+monitoring_local_src: "{{ role_path }}/../../../infra-monitoring"
+
+grafana_admin_password: "{{ vault_grafana_admin_password }}"
+grafana_container_uid: '472'
+monitoring_compose_project: infra-monitoring
+monitoring_grafana_volume: "{{ monitoring_compose_project }}_grafana"
