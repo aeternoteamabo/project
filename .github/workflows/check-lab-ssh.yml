@@ -41,3 +41,32 @@ jobs:
             echo "No SSH banner received on TCP port 2222"
             exit 1
           fi
+      - name: Verify adminops SSH login
+        env:
+          LAB_TAILSCALE_IP: ${{ vars.LAB_TAILSCALE_IP }}
+          LAB_SSH_KNOWN_HOSTS: ${{ vars.LAB_SSH_KNOWN_HOSTS }}
+          LAB_SSH_PRIVATE_KEY: ${{ secrets.LAB_SSH_PRIVATE_KEY }}
+        run: |
+          : "${LAB_TAILSCALE_IP:?Missing LAB_TAILSCALE_IP}"
+          : "${LAB_SSH_KNOWN_HOSTS:?Missing LAB_SSH_KNOWN_HOSTS}"
+          : "${LAB_SSH_PRIVATE_KEY:?Missing LAB_SSH_PRIVATE_KEY}"
+
+          umask 077
+          ssh_dir=$(mktemp -d)
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          printf '%s\n' "$LAB_SSH_PRIVATE_KEY" > "$ssh_dir/deploy_key"
+          printf '%s\n' "$LAB_SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+
+          login=$(ssh -T -o BatchMode=yes -o ConnectTimeout=10 \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
+            -o HostKeyAlias=fedora44-ansible-lab \
+            -o HostKeyAlgorithms=ssh-ed25519 \
+            -i "$ssh_dir/deploy_key" -p 2222 \
+            "adminops@$LAB_TAILSCALE_IP" 'id -un')
+
+          if [[ "$login" != adminops ]]; then
+            echo 'Expected remote user adminops'
+            exit 1
+          fi
+          echo 'SSH login verified: adminops'
